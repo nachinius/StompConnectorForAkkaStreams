@@ -32,7 +32,7 @@ licenses += "Apache License 2.0" -> url(s"https://github.com/$username/$repo/blo
 scmInfo := Some(ScmInfo(url(s"https://github.com/$username/$repo"), s"git@github.com:$username/$repo.git"))
 apiURL := Some(url(s"https://$username.github.io/$repo/latest/api/"))
 releaseCrossBuild := true
-releasePublishArtifactsAction := PgpKeys.publishSigned.value
+//releasePublishArtifactsAction := PgpKeys.publishSigned.value
 developers := List(
   Developer(id = username, name = "Ignacio `nachinius` Peixoto", email = "ignacio.peixoto@gmail.com", url = new URL(s"http://github.com/${username}"))
 )
