@@ -27,6 +27,8 @@ libraryDependencies += "org.scalatest" %% "scalatest" % scalaTestVersion % "test
 //libraryDependencies += "org.scalacheck" %% "scalacheck" % scalaCheckVersion % "test"
 //libraryDependencies += "org.scalacheck" %% "scalacheck" % scalaCheckVersion
 
+libraryDependencies += "org.parboiled" %% "parboiled" % "2.1.4"
+
 homepage := Some(url(s"https://github.com/$username/$repo"))
 licenses += "Apache License 2.0" -> url(s"https://github.com/$username/$repo/blob/master/LICENSE")
 scmInfo := Some(ScmInfo(url(s"https://github.com/$username/$repo"), s"git@github.com:$username/$repo.git"))
