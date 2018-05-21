@@ -87,27 +87,27 @@ class StompWireStompProtocolWithParboiled(val input: ParserInput) extends Parser
   val nullValue = "\u0000"
 
   def NULL = rule {
-    "\u0000"
+    StompProtocol.NULL
   }
 
   def cr = rule {
-    "\r"
+    StompProtocol.CR
   }
 
   def lf = rule {
-    "\n"
+    StompProtocol.LF
   }
 
   def colon = rule {
-    ':'
+    StompProtocol.COLON
   }
 
   def escape = rule {
-    '\\'
+    StompProtocol.ESCAPE
   }
 
   def comma = rule {
-    ','
+    StompProtocol.COMMA
   }
 
   def EOL = rule {
