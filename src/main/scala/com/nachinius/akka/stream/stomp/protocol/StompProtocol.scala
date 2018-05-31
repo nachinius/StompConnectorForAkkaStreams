@@ -31,6 +31,11 @@ case class Frame(command: StompCommand, headers: Map[String, Seq[String]] = Map(
   def isError = command == StompCommand.ERROR
 
   def isConnected = command == StompCommand.CONNECTED
+
+  def addHeader(header: String, value: String): Frame = self.copy(headers = headers.updated(header,
+    headers.getOrElse(header, Vector.empty) :+ value))
+
+  def replaceHeader(h: String, v: String): Frame = self.copy(headers = headers.updated(h, Vector(v)))
 }
 
 object Frame {

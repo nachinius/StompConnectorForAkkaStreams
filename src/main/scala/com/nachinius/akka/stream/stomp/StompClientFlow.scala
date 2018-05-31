@@ -31,7 +31,7 @@ object StompClientFlow {
 
         val connecting = b.add(Source.single(connectFrame(settings.host)))
 
-        val broadcast = b.add(Broadcast[Frame](2, true))
+        val broadcast = b.add(Broadcast[Frame](2, false))
         //      val mergePreferred = b.add(MergePreferred[Frame](1,false))
         val concat = b.add(Concat[Frame](2))
 
@@ -105,7 +105,8 @@ object StompClientFlow {
     */
   def connectFrame(host: String): Frame = Frame(CONNECT, Map(
     Frame.Header.acceptVersion -> Seq("1.2"),
-    Frame.Header.host -> Seq(host)
+    Frame.Header.host -> Seq(host),
+    Frame.Header.heartBeat -> Seq("0,0")
   ))
 }
 

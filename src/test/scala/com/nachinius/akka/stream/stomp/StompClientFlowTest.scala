@@ -3,7 +3,7 @@ package com.nachinius.akka.stream.stomp
 import akka.NotUsed
 import akka.actor.ActorRef
 import akka.stream.OverflowStrategy
-import akka.stream.scaladsl.{Keep, Sink, Source, Tcp}
+import akka.stream.scaladsl.{Flow, Keep, Sink, Source, Tcp}
 import akka.stream.testkit.{TestPublisher, TestSubscriber}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestProbe
@@ -21,18 +21,18 @@ class StompClientFlowTest extends StompClientSpec {
 
   val port = 61600
   val host = "localhost"
+  val settings = Settings(host, port, Tcp())
   val connectFrame = Frame(StompCommand.CONNECT, Map(Frame.Header.acceptVersion -> Seq("1.2")), None)
   val sendFrame = Frame(StompCommand.SEND, Map("hola" -> Seq("Houston")), Some("some part of the body")).withDestination("any")
 
-  "tcpConnectionFlow" must {
+  "framedFlow" must {
     "send CONNECT frame and receive a CONNECTED frame" in {
-      val settings = Settings(host, port, Tcp())
-      val flowUnderTest = StompClientFlow.framedFlow(settings)
-
       val server = getStompServer(None, port)
 
-      val ((pub, fut), sub) =
-        TestSource.probe[Frame].viaMat(flowUnderTest)(Keep.both).toMat(TestSink.probe[Frame])(Keep.both).run()
+      val flowUnderTest = StompClientFlow.framedFlow(settings)
+
+
+      val (pub, fut, sub) = probeFlow(flowUnderTest)
 
       sub.request(1)
       pub sendNext connectFrame
@@ -48,19 +48,34 @@ class StompClientFlowTest extends StompClientSpec {
     }
   }
 
-  "stompClientConnection" must {
+  "stompConnectedFlow" must {
     "be able to send MESSAGES as first stomp messages" in {
-      val settings = Settings(host, port, Tcp())
-      val flowUnderTest = StompClientFlow.stompConnectedFlow(settings)
-
       val server = getStompServer(None, port)
 
-      val ((pub, fut), sub) = TestSource.probe[Frame].viaMat(flowUnderTest)(Keep.both).toMat(TestSink.probe[Frame])(Keep.both).run()
+      val flowUnderTest = StompClientFlow.stompConnectedFlow(settings)
 
-      //      sub request 10
-      //      pub sendNext sendFrame
-      //      sub expectNoMessage (patience)
+      val (pub, fut, sub) = probeFlow(flowUnderTest)
+
       sub request 1
+      pub sendNext sendFrame
+      sub expectNoMessage (patience) // the server configured does not reply on messages unless there is an error
+      pub sendComplete()
+      sub expectComplete()
+
+      Await.ready(fut, patience)
+
+      closeAwaitStompServer(server)
+    }
+    "cancel when it receives an ERROR frame from the server" in {
+      val server = stompServerWithTopicAndQueue(port)
+
+      val flowUnderTest = StompClientFlow.stompConnectedFlow(settings)
+
+      val (pub, fut, sub) = probeFlow(flowUnderTest)
+
+      sub request 1
+      pub sendNext sendFrame.replaceHeader("destination", "\n\n\n")
+      sub expectNoMessage (patience) // the server configured does not reply on messages unless there is an error
       pub sendComplete()
       sub expectComplete()
 
@@ -69,5 +84,10 @@ class StompClientFlowTest extends StompClientSpec {
       closeAwaitStompServer(server)
     }
 
+  }
+
+  private def probeFlow(flowUnderTest: Flow[Frame, Frame, Future[Tcp.OutgoingConnection]]): (TestPublisher.Probe[Frame], Future[Tcp.OutgoingConnection], TestSubscriber.Probe[Frame]) = {
+    val ((pub, fut), sub) = TestSource.probe[Frame].viaMat(flowUnderTest)(Keep.both).toMat(TestSink.probe[Frame])(Keep.both).run()
+    (pub, fut, sub)
   }
 }
