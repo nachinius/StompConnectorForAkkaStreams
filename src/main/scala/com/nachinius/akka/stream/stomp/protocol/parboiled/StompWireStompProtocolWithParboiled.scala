@@ -133,15 +133,15 @@ class StompWireStompProtocolWithParboiled(val input: ParserInput) extends Parser
   }
 
   def command = rule {
-    (clientCommand | serverCommand) ~> StompWireStompProtocolWithParboiled.Command2
+    capture(serverCommand | clientCommand) ~> StompWireStompProtocolWithParboiled.Command2
   }
 
   def clientCommand = rule {
-    capture("SEND" | "SUBSCRIBE" | "UNSUBSCRIBE" | "BEGIN" | "COMMIT" | "ABORT" | "ACK" | "NACK" | "DISCONNECT" | "CONNECT" | "STOMP")
+    "SEND" | "SUBSCRIBE" | "UNSUBSCRIBE" | "BEGIN" | "COMMIT" | "ABORT" | "ACK" | "NACK" | "DISCONNECT" | "CONNECT" | "STOMP"
   }
 
   def serverCommand = rule {
-    capture("CONNECTED" | "MESSAGE" | "RECEIPT" | "ERROR")
+    "CONNECTED" | "MESSAGE" | "RECEIPT" | "ERROR"
   }
 
   def Headers = rule {

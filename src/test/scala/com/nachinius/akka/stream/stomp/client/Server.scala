@@ -50,13 +50,15 @@ private[stomp] object Server {
     Await.ready(promise.future, patienceWithServer)
   }
 
-  def accumulateHandler(accumulator: Frame => Unit): StompServerHandler =
+  def accumulateHandler(accumulator: Frame => Unit, accepted: Set[Frame.Command] = Set(Frame.Command.SEND), reportAll: Boolean = false): StompServerHandler =
     StompServerHandler
       .create(vertx)
       .receivedFrameHandler({ ar: ServerFrame =>
         {
+          //          println("In server--->"+ar.frame().toJson)
+          //          println("<<<-----End in server")
           // accumulate SEND received by Server
-          if (ar.frame().getCommand() == Frame.Command.SEND) {
+          if (reportAll || (accepted contains ar.frame().getCommand)) {
             accumulator(ar.frame())
           }
         }

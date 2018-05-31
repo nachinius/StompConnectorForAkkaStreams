@@ -14,8 +14,8 @@ object ParboiledImpl extends StompProtocol {
   override def encode(frame: Frame): Either[String, String] = {
     val command = frame.command.asString + "\n"
     val headers = frame.headers.flatMap({
-      case (name: String, values: Seq[String]) => values.map(v => name + ":" + v)
-    }).mkString("\n") + generateContentLengthHeader(frame)
+      case (name: String, values: Seq[String]) => values.map(v => name + ":" + v + "\n")
+    }).mkString("") + generateContentLengthHeader(frame) + "\n"
     Right(command + headers + frame.body.getOrElse("") + StompProtocol.NULL)
   }
 
