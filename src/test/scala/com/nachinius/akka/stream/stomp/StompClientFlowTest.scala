@@ -1,6 +1,6 @@
 package com.nachinius.akka.stream.stomp
 
-import akka.NotUsed
+import akka.{Done, NotUsed}
 import akka.actor.ActorRef
 import akka.stream.OverflowStrategy
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source, Tcp}
@@ -22,7 +22,7 @@ class StompClientFlowTest extends StompClientSpec {
 
   val port = 61600
   val host = "localhost"
-  val settings = Settings(host, port, Tcp())
+  implicit val settings = Settings(host, port, Tcp())
   val connectFrame = Frame(StompCommand.CONNECT, Map(Frame.Header.acceptVersion -> Seq("1.2")), None)
   val sendFrame = Frame(StompCommand.SEND, Map("hola" -> Seq("Houston")), Some("some part of the body")).withDestination("any")
 
@@ -89,19 +89,46 @@ class StompClientFlowTest extends StompClientSpec {
 
   "A stomp Source" must {
     "emit all messages sent to a stomp topic" in {
+      // this server handle topics, and just published whatever receiver under such topic
       val server = stompServerWithTopicAndQueue(port)
 
-      val msg = """MESSAGE
-                  |subscription:0
-                  |message-id:007
-                  |destination:/queue/a
-                  |content-type:text/plain
-                  |
-                  |hello queue a\u0000"""
-      val sourceUnderTest = Source.repeat(ParboiledImpl.decode(msg).right.asInstanceOf[Frame])
+      val topic = "mytopic"
 
-      val probe = sourceUnderTest.runWith(TestSink.probe[Frame])
-      probe.requestNext()
+      // a client and probe to submit message to the Stomp server under topic `topic`
+      val (pub, futpub) = TestSource.probe[Frame].map({
+        frame => frame.addHeader(Frame.Header.destination,topic)
+      }).viaMat(StompClientFlow.stompConnectedFlow(settings))(Keep.both).to(Sink.ignore).run()
+      // a client and probe to submit message to the Stomp server under topic `topic`
+
+      val (pubToAnotherTopic, futpub2) = TestSource.probe[Frame].map({
+        frame => frame.addHeader(Frame.Header.destination,"anyothertopic" + topic)
+      }).viaMat(StompClientFlow.stompConnectedFlow(settings))(Keep.both).to(Sink.ignore).run()
+
+      // code under test
+      val source = StompClientFlow.subscribeTopic(topic)
+      val ((futsub: Future[Done],futconn), sub) = source.toMat(TestSink.probe[Frame])(Keep.both).run()
+
+      Await.ready(futconn,patience)
+      Await.ready(futsub,patience)
+
+      import StompCommand.SEND
+      pub sendNext Frame(SEND,Map(),Some("hi"))
+      pubToAnotherTopic sendNext Frame(SEND,Map(),Some("nohi"))
+
+      val msg1 = sub requestNext()
+      msg1.body shouldBe Some("hi2")
+
+      sub expectNoMessage(patience)
+
+      pub sendNext Frame(SEND,Map(),Some("is there anybody there?"))
+      (sub expectNext() body) shouldBe Some("is there anybody there?")
+
+
+      pub sendComplete()
+      sub cancel()
+
+
+      closeAwaitStompServer(server)
     }
   }
 

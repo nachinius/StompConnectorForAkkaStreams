@@ -20,6 +20,6 @@ object ParboiledImpl extends StompProtocol {
   }
 
   private def generateContentLengthHeader(frame: Frame): String = {
-    frame.body.fold("")(StompWireStompProtocolWithParboiled.contentLength + ":" + _.length.toString + "\n")
+    frame.body.fold("")(Frame.Header.contentLength + ":" + _.length.toString + "\n")
   }
 }
