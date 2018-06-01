@@ -25,9 +25,59 @@ object StompClientFlow {
   def client(host: String, port: Int, tcp: Tcp): Flow[Frame, Frame, Future[OutgoingConnection]] = client(Settings(host, port, tcp))
 
   /**
-    * Flow subscribed to a specific stomp server's topic
+    * Source that connects to a Stomp Server, and subscribes to the given topic, emitting all elements received (for that topic)
+    *
+    * @param topic
+    * @param settings
+    * @return
     */
+  def subscribeTopic(topic: String)(implicit settings: Settings): Source[Frame, Future[OutgoingConnection]] = {
+    Source.single(anyFrame).viaMat(
+      subscribeBidiFlow(topic).atop(connectToStompStep).atop(ByteStringFrameCodec).joinMat(tcpFlow)(Keep.right)
+    )(Keep.right)
+  }
 
+  val anyFrame = Frame(OTHER("never to be deliver to server"))
+
+  /**
+    * Stage that handle subscribing to a STOMP server's topic (holds flows until subscription is confirmed).
+    */
+  def subscribeBidiFlow(topic: String)(implicit settings: Settings) = BidiFlow.fromGraph(GraphDSL.create() { implicit b =>
+    import GraphDSL.Implicits._
+
+    val subscribeMeId = "subscribeMeId0"
+    val subscriptionId = 0
+    val subscribe = b.add(Source.single(subscribeFrame(topic, subscriptionId, Some(subscribeMeId))))
+    val concat = b.add(Concat[Frame](3))
+
+    val broadcast = b.add(Partition[Frame](2, {
+      case Frame(RECEIPT, _, _) => 0
+      case _ => 1
+    }))
+
+    val expectTheReceiptFrame = Flow[Frame].
+      dropWhile(
+        f => !f.headers.get(Frame.Header.receiptId).flatMap(_.headOption).contains(subscribeMeId)).
+      take(1).
+      drop(1) // completes after receiving the receiptId of the subcription
+
+
+    val out = broadcast ~> Flow[Frame].collect({
+      case msg@Frame(MESSAGE, _, _) => msg
+      case error@Frame(ERROR, _, _) => throw new StompProtocolError("Error frame received\n" + error.toString)
+      case unknown@Frame(StompCommand.OTHER(str), _, _) => throw new StompProtocolError(s"Unknown stomp command received from server 'str'\n" + unknown.toString)
+    }) ~> Flow[Frame].filter(f => f.headers.get(Frame.Header.messageId).flatMap(_.headOption).contains(subscriptionId.toString))
+
+    // 1. First we SUBSCRIBE
+    subscribe ~> concat.in(0)
+
+    // 2. We wait for acknowledgement of such subscription
+    // holds emiting the stream towards server, until a RECEIPT with receipt-id given by the suscription frame is received
+    broadcast ~> expectTheReceiptFrame ~> concat.in(1)
+
+    // 3. and then we continue the bidiflow
+    BidiShape.of(concat.in(2), concat.out, broadcast.in, out.outlet)
+  })
 
   /**
     * Flow to a Stomp Server, where the 'connection' has been established
@@ -108,6 +158,14 @@ object StompClientFlow {
     Frame.Header.host -> Seq(host),
     Frame.Header.heartBeat -> Seq("0,0")
   ))
+
+  def subscribeFrame(topic: String, id: Int = 0, receiptId: Option[String] = None): Frame = {
+    val frame = Frame(SUBSCRIBE).
+      addHeader("id", id.toString).
+      addHeader("destination", topic).
+      addHeader("ack", "auto")
+    receiptId.map(id => frame.addHeader("receipt", id)).getOrElse(frame)
+  }
 }
 
 class StompProtocolError(msg: String) extends Exception {

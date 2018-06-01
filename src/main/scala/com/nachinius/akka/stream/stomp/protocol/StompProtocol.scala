@@ -32,6 +32,8 @@ case class Frame(command: StompCommand, headers: Map[String, Seq[String]] = Map(
 
   def isConnected = command == StompCommand.CONNECTED
 
+  def isReceipt = command == StompCommand.RECEIPT
+
   def addHeader(header: String, value: String): Frame = self.copy(headers = headers.updated(header,
     headers.getOrElse(header, Vector.empty) :+ value))
 
@@ -41,6 +43,7 @@ case class Frame(command: StompCommand, headers: Map[String, Seq[String]] = Map(
 object Frame {
 
   object Header {
+
     val acceptVersion = "accept-version"
     val host = "host"
     val login = "login"
@@ -48,6 +51,10 @@ object Frame {
     val heartBeat = "heart-beat"
     val version = "version"
     val destination = "destination"
+    val receipt = "receipt"
+    val receiptId = "receipt-id"
+    val contentLength = "content-length"
+    val messageId = "message-id"
   }
 
 }

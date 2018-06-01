@@ -10,6 +10,7 @@ import akka.testkit.TestProbe
 import com.nachinius.akka.stream.stomp.StompClientFlow.Settings
 import com.nachinius.akka.stream.stomp.client.StompClientSpec
 import com.nachinius.akka.stream.stomp.client.Server._
+import com.nachinius.akka.stream.stomp.protocol.parboiled.ParboiledImpl
 import com.nachinius.akka.stream.stomp.protocol.{Frame, StompCommand}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{AsyncFreeSpec, Matchers}
@@ -84,6 +85,24 @@ class StompClientFlowTest extends StompClientSpec {
       closeAwaitStompServer(server)
     }
 
+  }
+
+  "A stomp Source" must {
+    "emit all messages sent to a stomp topic" in {
+      val server = stompServerWithTopicAndQueue(port)
+
+      val msg = """MESSAGE
+                  |subscription:0
+                  |message-id:007
+                  |destination:/queue/a
+                  |content-type:text/plain
+                  |
+                  |hello queue a\u0000"""
+      val sourceUnderTest = Source.repeat(ParboiledImpl.decode(msg).right.asInstanceOf[Frame])
+
+      val probe = sourceUnderTest.runWith(TestSink.probe[Frame])
+      probe.requestNext()
+    }
   }
 
   private def probeFlow(flowUnderTest: Flow[Frame, Frame, Future[Tcp.OutgoingConnection]]): (TestPublisher.Probe[Frame], Future[Tcp.OutgoingConnection], TestSubscriber.Probe[Frame]) = {

@@ -30,7 +30,7 @@ object StompWireStompProtocolWithParboiled {
     val headers = frame.headers
     val next = input.sliceString(cursor, input.length + 1)
     // the first header is the real one
-    val mayContentLength = headers.find(_._1 == contentLength).map(_._2)
+    val mayContentLength = headers.find(_._1 == Frame.Header.contentLength).map(_._2)
     (lookForBody, mayContentLength) match {
       case (true, None) =>
         new StompWireStompProtocolWithParboiled(next).BodyWithNullTermination.run().map(Some(_))
@@ -42,9 +42,6 @@ object StompWireStompProtocolWithParboiled {
         new StompWireStompProtocolWithParboiled(next).ProperTermination.run().map(_ => None)
     }
   }
-
-
-  val contentLength = "content-length"
 
   case class Header(header: String, value: String) {
 
