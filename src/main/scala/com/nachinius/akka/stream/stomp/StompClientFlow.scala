@@ -43,12 +43,12 @@ object StompClientFlow {
 
       val broadcast = b.add(Broadcast[Frame](2, false))
 
-      broadcast ~> Flow[Frame].dropWhile(f => !f.isConnected).take(1) ~> Sink.ignore
+      broadcast ~> Flow[Frame].dropWhile(f => !f.isConnected).map(f => {println("YES! we're connected");f}).take(1) ~> Sink.ignore
 
-      val out = broadcast ~> Flow[Frame].collect({
-        case msg@Frame(MESSAGE, _, _) => msg
+      val out = broadcast ~> Flow[Frame].map(f => {println("we are transfering " + f.command.asString);f}).collect({
         case error@Frame(ERROR, _, _) => throw new StompProtocolError("Error frame received\n" + error.toString)
         case unknown@Frame(StompCommand.OTHER(str), _, _) => throw new StompProtocolError(s"Unknown stomp command received from server 'str'\n" + unknown.toString)
+        case msg: Frame => msg
       })
 
       BidiShape.of(concat.in(1), concat.out, broadcast.in, out.outlet)
