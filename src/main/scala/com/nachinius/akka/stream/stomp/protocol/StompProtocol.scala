@@ -21,6 +21,9 @@ case class Frame(command: StompCommand, headers: Map[String, Seq[String]] = Map(
     val nextHeaders = headers + (Frame.Header.destination -> Seq(dest))
     self.copy(headers = nextHeaders)
   }
+  def withBody(body: String) = {
+    self.copy(body = Some(body))
+  }
 
   def isClientFrame = command.isInstanceOf[ClientCommand]
 
@@ -55,6 +58,7 @@ object Frame {
     val receiptId = "receipt-id"
     val contentLength = "content-length"
     val messageId = "message-id"
+    val subscription = "subscription"
   }
 
 }

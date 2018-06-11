@@ -3,6 +3,11 @@ package com.nachinius.akka.stream.stomp.protocol.parboiled
 import com.nachinius.akka.stream.stomp.protocol.{Frame, StompCommand, StompProtocol}
 
 object ParboiledImpl extends StompProtocol {
+  /**
+    * Tranform a STOMP's string representation of a message into a `Frame` case class
+    * @param input
+    * @return
+    */
   override def decode(input: String): Either[String, Frame] = StompWireStompProtocolWithParboiled.parse(input).map(
     decodedFrame => Frame(
       StompCommand.fromString(decodedFrame.command),
@@ -11,6 +16,11 @@ object ParboiledImpl extends StompProtocol {
     )
   )
 
+  /**
+    * Transform the case-class Frame into it's STOMP text representation
+    * @param frame
+    * @return
+    */
   override def encode(frame: Frame): Either[String, String] = {
     val command = frame.command.asString + "\n"
     val headers = frame.headers.flatMap({

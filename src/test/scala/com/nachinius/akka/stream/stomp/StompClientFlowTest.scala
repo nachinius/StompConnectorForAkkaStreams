@@ -8,10 +8,12 @@ import akka.stream.testkit.{TestPublisher, TestSubscriber}
 import akka.stream.testkit.scaladsl.{TestSink, TestSource}
 import akka.testkit.TestProbe
 import com.nachinius.akka.stream.stomp.StompClientFlow.Settings
-import com.nachinius.akka.stream.stomp.client.StompClientSpec
+import com.nachinius.akka.stream.stomp.client.{ConnectorSettings, DetailsConnectionProvider, SendingFrame, StompClientSpec}
 import com.nachinius.akka.stream.stomp.client.Server._
+import com.nachinius.akka.stream.stomp.scaladsl.StompClientSource
 import com.nachinius.akka.stream.stomp.protocol.parboiled.ParboiledImpl
 import com.nachinius.akka.stream.stomp.protocol.{Frame, StompCommand}
+import io.vertx.ext.stomp.StompServer
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{AsyncFreeSpec, Matchers}
 
@@ -22,7 +24,7 @@ class StompClientFlowTest extends StompClientSpec {
 
   val port = 61600
   val host = "localhost"
-  implicit val settings = Settings(host, port, Tcp())
+  implicit val settings = Settings(host, port, Tcp(),Some(5))
   val connectFrame = Frame(StompCommand.CONNECT, Map(Frame.Header.acceptVersion -> Seq("1.2")), None)
   val sendFrame = Frame(StompCommand.SEND, Map("hola" -> Seq("Houston")), Some("some part of the body")).withDestination("any")
 
@@ -88,45 +90,67 @@ class StompClientFlowTest extends StompClientSpec {
   }
 
   "A stomp Source" must {
-    "emit all messages sent to a stomp topic" in {
+    "emit all messages sent to the stomp topic that is registered to" in {
       // this server handle topics, and just published whatever receiver under such topic
-      val server = stompServerWithTopicAndQueue(port)
+      val server: StompServer = stompServerWithTopicAndQueue(port)
 
       val topic = "mytopic"
+      val badTopic = "bad"
 
       // a client and probe to submit message to the Stomp server under topic `topic`
-      val (pub, futpub) = TestSource.probe[Frame].map({
-        frame => frame.addHeader(Frame.Header.destination,topic)
+      val publisher: (TestPublisher.Probe[Frame], Future[Tcp.OutgoingConnection]) = TestSource.probe[Frame].map({
+        frame => frame.replaceHeader(Frame.Header.destination,topic)
       }).viaMat(StompClientFlow.stompConnectedFlow(settings))(Keep.both).to(Sink.ignore).run()
-      // a client and probe to submit message to the Stomp server under topic `topic`
 
-      val (pubToAnotherTopic, futpub2) = TestSource.probe[Frame].map({
-        frame => frame.addHeader(Frame.Header.destination,"anyothertopic" + topic)
+      // a client and probe to submit message to the Stomp server under a different topic
+      val otherPublisher: (TestPublisher.Probe[Frame], Future[Tcp.OutgoingConnection]) = TestSource.probe[Frame].map({
+        frame => frame.replaceHeader(Frame.Header.destination, badTopic)
       }).viaMat(StompClientFlow.stompConnectedFlow(settings))(Keep.both).to(Sink.ignore).run()
+
+      // A test client using another technology
+      val vertxSubscriber: (Future[Done], TestSubscriber.Probe[SendingFrame]) =
+        StompClientSource(
+          ConnectorSettings(
+            DetailsConnectionProvider(host, port, None),
+            Some(topic)
+          )).
+          toMat(TestSink.probe)(Keep.both).run()
 
       // code under test
-      val source = StompClientFlow.subscribeTopic(topic)
-      val ((futsub: Future[Done],futconn), sub) = source.toMat(TestSink.probe[Frame])(Keep.both).run()
-
-      Await.ready(futconn,patience)
-      Await.ready(futsub,patience)
-
-      import StompCommand.SEND
-      pub sendNext Frame(SEND,Map(),Some("hi"))
-      pubToAnotherTopic sendNext Frame(SEND,Map(),Some("nohi"))
-
-      val msg1 = sub requestNext()
-      msg1.body shouldBe Some("hi2")
-
-      sub expectNoMessage(patience)
-
-      pub sendNext Frame(SEND,Map(),Some("is there anybody there?"))
-      (sub expectNext() body) shouldBe Some("is there anybody there?")
+      val underTest: ((Future[Done], Future[Tcp.OutgoingConnection]), TestSubscriber.Probe[Frame]) =
+        StompClientFlow.subscribeTopic(topic).
+          toMat(TestSink.probe[Frame])(Keep.both).
+          run()
 
 
-      pub sendComplete()
-      sub cancel()
+      // wait for connections
+      underTest._1._2.futureValue
+      vertxSubscriber._1.futureValue
+      publisher._2.futureValue
+      otherPublisher._2.futureValue
 
+      // with some demand
+      underTest._2.request(1)
+      Thread.sleep(1000)
+      // wait for subscription acknowledgemente
+      Await.ready(underTest._1._1,patience)
+      underTest._1._1.futureValue shouldBe Done
+
+      (1 to 5).foreach { x =>
+        publisher._1.sendNext(sendFrame.withBody(x.toString))
+        otherPublisher._1.sendNext(sendFrame.withBody((x+100).toString))
+      }
+      underTest._2.expectNext().body shouldBe Some("1")
+      underTest._2.expectNoMessage(FiniteDuration(500,"milliseconds"))
+      underTest._2.request(2)
+      underTest._2.expectNextN(2).map(_.body).flatten should contain only ("2","3")
+      println("vertx received " + vertxSubscriber._2.requestNext().toVertexFrame)
+      underTest._2.request(2)
+      underTest._2.expectNextN(2).map(_.body).flatten should contain only ("4","5")
+      underTest._2.cancel()
+      vertxSubscriber._2.cancel()
+      publisher._1.sendComplete()
+      otherPublisher._1.sendComplete()
 
       closeAwaitStompServer(server)
     }

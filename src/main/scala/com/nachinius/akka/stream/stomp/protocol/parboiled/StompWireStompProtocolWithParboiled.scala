@@ -1,45 +1,66 @@
 package com.nachinius.akka.stream.stomp.protocol.parboiled
 
-import com.nachinius.akka.stream.stomp.protocol.{Frame, StompCommand, StompProtocol}
+import com.nachinius.akka.stream.stomp.protocol.{Frame, StompProtocol}
+import org.parboiled2.Parser.DeliveryScheme.Either
 import org.parboiled2._
-import Parser.DeliveryScheme.Either
-
+import shapeless.HNil
 
 
 object StompWireStompProtocolWithParboiled {
 
-  def parse(input: ParserInput) = {
+  def parse(input: ParserInput): Either[String, DecodedFrame] = {
+    val headerAndCursor: Either[String, (DecodedFrame, Int)] = parseTopWithCursor(input)
+
+    headerAndCursor.flatMap({
+      case (frame: DecodedFrame, cursor: Int) =>
+        val maybodyOrError = getBodyIfShouldHave(frame, input, cursor)
+        maybodyOrError.map( optBody => frame.copy(body = optBody))
+    })
+  }
+
+  private def parseTopWithCursor(input: ParserInput): Either[String, (DecodedFrame, Int)] = {
     val parser = new StompWireStompProtocolWithParboiled(input)
+    val headerAndCursor = parser.CommandHeadersAndCursor.run()
 
-    val errorOrFrame = for {
-      lst <- parser.CommandHeadersAndCursor.run()
-      frame = lst.head
-      cursor: Int = lst.tail.head.cursor
-      body <- getBodyIfShouldHave(frame, input, cursor)
-    } yield frame.copy(body = body)
-
-    errorOrFrame match {
+    headerAndCursor match {
       case Left(error) => Left(parser.formatError(error))
-      case Right(frame) => Right(frame)
+      case Right(z) => Right(z.head, z.tail.head.cursor)
     }
   }
 
-  def getBodyIfShouldHave(frame: DecodedFrame, input: ParserInput, cursor: Int): Either[ParseError, Option[String]] = {
+  private def getBodyIfShouldHave(frame: DecodedFrame, input: ParserInput, cursor: Int): Either[String, Option[String]] = {
     val command = frame.command
     val lookForBody = Command.mayHaveBody(command)
     val headers = frame.headers
-    val next = input.sliceString(cursor, input.length + 1)
+    val next = input.sliceString(cursor, input.length)
     // the first header is the real one
     val mayContentLength = headers.find(_._1 == Frame.Header.contentLength).map(_._2)
     (lookForBody, mayContentLength) match {
       case (true, None) =>
-        new StompWireStompProtocolWithParboiled(next).BodyWithNullTermination.run().map(Some(_))
+        // body is ended by NULL
+        val parboiled = new StompWireStompProtocolWithParboiled(next)
+        val resultOrError = parboiled.BodyWithNullTermination.run()
+        resultOrError match {
+          case Left(error) => Left(parboiled.formatError(error))
+          case Right(result) => Right(Some(result))
+        }
       case (true, Some(x)) =>
+        // body length is at least 'x'
         val atLeast = x.toInt
-        val firstPart = next.slice(0, atLeast + 1)
-        new StompWireStompProtocolWithParboiled(next.slice(atLeast + 1, input.length + 1)).BodyWithNullTermination.run().map(firstPart + _).map(Some(_))
+        val (firstPart, hereNext) = next.splitAt(atLeast)
+        val parboiled = new StompWireStompProtocolWithParboiled(hereNext)
+        val resultOrError = parboiled.BodyWithNullTermination.run()
+        resultOrError match {
+          case Left(error) => Left(parboiled.formatError(error))
+          case z@Right(result) => Right(Some(firstPart + result))
+        }
       case (false, _) =>
-        new StompWireStompProtocolWithParboiled(next).ProperTermination.run().map(_ => None)
+        val parboiled = new StompWireStompProtocolWithParboiled(next)
+        val resultOrError = parboiled.ProperTermination.run()
+        resultOrError match {
+          case Left(error) => Left(parboiled.formatError(error))
+          case _ => Right(None)
+        }
     }
   }
 
@@ -48,14 +69,6 @@ object StompWireStompProtocolWithParboiled {
   }
 
   case class Command2(value: String) extends AnyVal
-
-  object Command {
-    private val mayBody = Set("SEND", "MESSAGE", "ERROR")
-
-    def mayHaveBody(value: String) = mayBody.contains(value)
-
-    def mustNotHaveBody(value: String) = !mayBody.contains(value)
-  }
 
   case class CommandHeaders(command: Command2, headers: Seq[Header]) {
     def toFrame: DecodedFrame = {
@@ -71,6 +84,14 @@ object StompWireStompProtocolWithParboiled {
 
   case class Cursor(cursor: Int) extends AnyVal
 
+  object Command {
+    private val mayBody = Set("SEND", "MESSAGE", "ERROR")
+
+    def mayHaveBody(value: String) = mayBody.contains(value)
+
+    def mustNotHaveBody(value: String) = !mayBody.contains(value)
+  }
+
 }
 
 class StompWireStompProtocolWithParboiled(val input: ParserInput) extends Parser {
@@ -82,18 +103,6 @@ class StompWireStompProtocolWithParboiled(val input: ParserInput) extends Parser
 
 
   val nullValue = "\u0000"
-
-  def NULL = rule {
-    StompProtocol.NULL
-  }
-
-  def cr = rule {
-    StompProtocol.CR
-  }
-
-  def lf = rule {
-    StompProtocol.LF
-  }
 
   def colon = rule {
     StompProtocol.COLON
@@ -107,10 +116,6 @@ class StompWireStompProtocolWithParboiled(val input: ParserInput) extends Parser
     StompProtocol.COMMA
   }
 
-  def EOL = rule {
-    optional(cr) ~ lf
-  }
-
   def CommandAndHeaders = rule {
     command ~ EOL ~
       Headers ~
@@ -121,12 +126,28 @@ class StompWireStompProtocolWithParboiled(val input: ParserInput) extends Parser
     CommandAndHeaders ~ push(StompWireStompProtocolWithParboiled.Cursor(cursor))
   }
 
+  def BodyWithNullTermination = rule {
+    capture(noneOf(nullValue).*) ~ ProperTermination
+  }
+
   def ProperTermination = rule {
     NULL ~ EOL.*
   }
 
-  def BodyWithNullTermination = rule {
-    capture(noneOf(nullValue).*) ~ ProperTermination
+  def NULL = rule {
+    StompProtocol.NULL
+  }
+
+  def EOL = rule {
+    optional(cr) ~ lf
+  }
+
+  def cr = rule {
+    StompProtocol.CR
+  }
+
+  def lf = rule {
+    StompProtocol.LF
   }
 
   def command = rule {

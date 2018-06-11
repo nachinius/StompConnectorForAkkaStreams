@@ -53,8 +53,25 @@ class StompWireStompProtocolWithParboiledTest extends FunSuite with Matchers wit
          |content-length:10
          |
          |12${NULL}456${NULL}89abc$NULL
-       """.stripMargin
-
+       """.stripMargin,
+     "messages with headers and body" ->
+       s"""MESSAGE
+        |message-id:43f18ade-f2cd-4ba1-aedf-11a035219643
+        |content-length:3
+        |destination:mytopic
+        |subscription:0
+        |
+        |hi2$NULL""".stripMargin,
+    "a subscribe message" ->
+    s"""
+       |SUBSCRIBE
+       |id:0
+       |destination:mytopic
+       |ack:auto
+       |receipt:subscribeMeId0
+       |
+       |$NULL
+     """.stripMargin
   )
 
   val badFrames = Map(
@@ -78,9 +95,9 @@ class StompWireStompProtocolWithParboiledTest extends FunSuite with Matchers wit
 //    println(s"for `$name` which has input\n----`$input`")
     val r = parse(input)
     if(expectation) {
-      assert(r.isRight, if(r.isLeft) r.left.value else s"$name")
+      assert(r.isRight, if(r.isLeft) s"`$name` on input " + input+"\n"+ r.left.value else s"$name")
     } else {
-      assert(r.isLeft, if(r.isRight) r.right.value else s"$name")
+      assert(r.isLeft, if(r.isRight) s"`$name` on input " + input+"\n" + r.right.value else s"$name")
     }
 //    println("\n____\n")
   }
