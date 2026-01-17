@@ -16,6 +16,17 @@ object ConnectorSettings {
     ConnectorSettings(connectionProvider = LocalConnectionProvider)
 }
 
+/**
+ * Settings for configuring STOMP client connections.
+ *
+ * @param connectionProvider The provider responsible for creating STOMP client connections.
+ * @param destination Optional destination (topic or queue) to subscribe to or send messages to.
+ *                   Required for [[com.nachinius.akka.stream.stomp.scaladsl.StompClientSource]].
+ *                   Optional for [[com.nachinius.akka.stream.stomp.scaladsl.StompClientSink]]
+ *                   (can be set per message instead).
+ * @param withAck Whether to use client acknowledgment mode. When true, messages must be
+ *               acknowledged before the next message is requested. Defaults to true.
+ */
 case class ConnectorSettings(
     connectionProvider: ConnectionProvider,
     destination: Option[String] = None,

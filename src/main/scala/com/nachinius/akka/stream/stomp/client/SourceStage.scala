@@ -9,7 +9,8 @@ import akka.stream._
 import akka.stream.stage._
 import io.vertx.ext.stomp.{Frame, StompClientConnection}
 
-import scala.collection.{JavaConverters, mutable}
+import scala.collection.mutable
+import scala.collection.JavaConverters._
 import scala.concurrent.{Future, Promise}
 
 /**
@@ -36,24 +37,29 @@ final class SourceStage(settings: ConnectorSettings)
 
       var pending: Option[Frame] = None
       override def whenConnected(): Unit = {
-        val receiveSubscriptionMessage = getAsyncCallback[Frame] { frame =>
-          {
-            pending = Some(frame)
-            handleDelivery(frame)
-          }
+        settings.destination match {
+          case Some(dest) =>
+            val receiveSubscriptionMessage = getAsyncCallback[Frame] { frame =>
+              {
+                pending = Some(frame)
+                handleDelivery(frame)
+              }
 
+            }
+
+            connection.subscribe(
+              dest,
+              headers.asJava, { frame: Frame =>
+                receiveSubscriptionMessage.invoke(frame)
+              }, { frame: Frame =>
+                acknowledge(frame)
+              }
+            )
+          case None =>
+            val ex = new IllegalArgumentException("destination is required for StompClientSource")
+            promise.tryFailure(ex)
+            failStage(ex)
         }
-
-        import JavaConverters._
-
-        connection.subscribe(
-          settings.destination.get,
-          headers.asJava, { frame: Frame =>
-            receiveSubscriptionMessage.invoke(frame)
-          }, { frame: Frame =>
-            acknowledge(frame)
-          }
-        )
       }
 
       override def receiveHandler(connection: StompClientConnection): Unit =
@@ -102,7 +108,7 @@ final class SourceStage(settings: ConnectorSettings)
 
   override def shape: SourceShape[SendingFrame] = SourceShape.of(out)
 
-  override def toString: String = "StompClientSink"
+  override def toString: String = "StompClientSource"
 
   override protected def initialAttributes: Attributes = SourceStage.defaultAttributes
 
